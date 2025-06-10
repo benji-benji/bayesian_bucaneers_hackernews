@@ -22,27 +22,23 @@ def load_titles(pg_url, limit=10000):
 stemmer = PorterStemmer()
 # Basic tokenizer using regex
 def tokenize(text):
-    '''
-    Keep punctuation as separate tokens
-    Lowercase and split on word boundaries
-    This regex captures words and punctuation separately
-    \w+ matches word characters, [^\w\s] matches punctuation
-    '''
+    
+    #Keep punctuation as separate tokens
+    #Lowercase and split on word boundaries
+    #This regex captures words and punctuation separately
+    #\w+ matches word characters, [^\w\s] matches punctuation
     tokens = re.findall(r"\w+|[^\w\s]", text.lower())
     
-    '''
-    Stem tokens if they are alphabetic
-    Use Porter Stemmer for stemming
-    If the token is not alphabetic, keep it as is
-    This will stem words like "running" to "run", but keep numbers and punctuation intact
-    "Hello!" → Tokens: ["hello", "!"]
-    "!?" → Tokens: ["!", "?"]
-    '''
+    #Stem tokens if they are alphabetic
+    #Use Porter Stemmer for stemming
+    #If the token is not alphabetic, keep it as is
+    #This will stem words like "running" to "run", but keep numbers and punctuation intact
+    #"Hello!" → Tokens: ["hello", "!"]
+    #"!?" → Tokens: ["!", "?"]
+
     
     return [stemmer.stem(token) if token.isalpha() else token 
             for token in tokens]
-
-
 
 # Yield token lists for each title
 def yield_tokens(texts):
