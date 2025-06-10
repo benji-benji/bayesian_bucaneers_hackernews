@@ -1,0 +1,69 @@
+# tokenize_hn_titles.py
+
+import psycopg2
+import torch
+from torchtext.vocab import build_vocab_from_iterator
+from torch.nn.utils.rnn import pad_sequence
+import re
+
+# ----------------------------------------
+# 1. Connect to PostgreSQL and Load Titles
+# ----------------------------------------
+def load_titles(pg_url, limit=10000):
+    conn = psycopg2.connect(pg_url)
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT title FROM hacker_news.items
+        WHERE title IS NOT NULL
+        LIMIT {limit}
+    """)
+    titles = [row[0] for row in cur.fetchall()]
+    conn.close()
+    return titles
+
+# ----------------------------------------
+# 2. Basic Tokenizer (regex-based)
+# ----------------------------------------
+def tokenize(text):
+    return re.findall(r'\b\w+\b', text.lower())
+
+# ----------------------------------------
+# 3. Token Pipeline
+# ----------------------------------------
+def yield_tokens(texts):
+    for text in texts:
+        yield tokenize(text)
+
+# ----------------------------------------
+# 4. Convert to Tensors
+# ----------------------------------------
+def encode_titles(titles, vocab):
+    token_ids = [
+        torch.tensor(vocab(tokenize(title)), dtype=torch.long)
+        for title in titles
+    ]
+    return pad_sequence(token_ids, batch_first=True, padding_value=vocab['<pad>'])
+
+# ----------------------------------------
+# 5. Main Pipeline
+# ----------------------------------------
+def main(pg_url):
+    titles = load_titles(pg_url)
+
+    vocab = build_vocab_from_iterator(yield_tokens(titles), specials=['<pad>', '<unk>'])
+    vocab.set_default_index(vocab['<unk>'])
+
+    encoded_tensor = encode_titles(titles, vocab)
+
+    print("Vocab size:", len(vocab))
+    print("Example tensor shape:", encoded_tensor.shape)
+    print("First encoded title:", encoded_tensor[0])
+
+    return encoded_tensor, vocab
+
+# ----------------------------------------
+# Example usage
+# ----------------------------------------
+if __name__ == "__main__":
+    pg_url = "postgresql://sy91dhb:g5t49ao@178.156.142.230:5432/hd64m1ki"
+    encoded_titles, vocab = main(pg_url)
