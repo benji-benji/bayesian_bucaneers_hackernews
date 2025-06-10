@@ -1,0 +1,99 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import psycopg2
+import re
+import nltk
+from nltk.tokenize import word_tokenize
+from gensim.models import Word2Vec
+from torch.utils.data import Dataset, DataLoader
+nltk.download('punkt')
+
+# -----------------------------
+# 1. Train CBOW on Wikipedia Text8
+# -----------------------------
+from gensim.test.utils import datapath
+from gensim.models.word2vec import Text8Corpus
+
+print("Training CBOW model...")
+corpus = Text8Corpus(datapath('text8'))
+cbow_model = Word2Vec(sentences=corpus, vector_size=100, window=5, min_count=5, sg=0, workers=4)
+embedding_dim = cbow_model.vector_size
+
+# -----------------------------
+# 2. Load and preprocess data from PostgreSQL
+# -----------------------------
+print("Fetching Hacker News titles...")
+conn = psycopg2.connect("postgres://sy91dhb:g5t49ao@178.156.142.230:5432/hd64m1ki")
+cur = conn.cursor()
+cur.execute("SELECT title, upvotes FROM hacker_news WHERE title IS NOT NULL AND upvotes IS NOT NULL;")
+data = cur.fetchall()
+conn.close()
+
+def preprocess(text):
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    return word_tokenize(text)
+
+titles = []
+labels = []
+for title, upvotes in data:
+    tokens = preprocess(title)
+    embeddings = [cbow_model.wv[token] for token in tokens if token in cbow_model.wv]
+    if embeddings:
+        avg_embedding = sum(embeddings) / len(embeddings)
+        titles.append(avg_embedding)
+        labels.append(float(upvotes))
+
+X = torch.tensor(titles, dtype=torch.float32)
+y = torch.tensor(labels, dtype=torch.float32).unsqueeze(1)
+
+# -----------------------------
+# 3. PyTorch Dataset & DataLoader
+# -----------------------------
+class HNTitleDataset(Dataset):
+    def __init__(self, X, y):
+        self.X = X
+        self.y = y
+    def __len__(self):
+        return len(self.X)
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
+dataset = HNTitleDataset(X, y)
+dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+# -----------------------------
+# 4. Neural Network Model
+# -----------------------------
+class UpvotePredictor(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+    def forward(self, x):
+        return self.model(x)
+
+model = UpvotePredictor(embedding_dim)
+loss_fn = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# -----------------------------
+# 5. Training Loop
+# -----------------------------
+print("Training regression model...")
+for epoch in range(10):  # Increase epochs for better results
+    total_loss = 0
+    for batch_x, batch_y in dataloader:
+        pred = model(batch_x)
+        loss = loss_fn(pred, batch_y)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    print(f"Epoch {epoch+1}, Loss: {total_loss:.4f}")
